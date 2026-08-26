@@ -1,0 +1,38 @@
+# Project folders
+data/
+artifacts/checkpoints/
+outputs/
+
+# Local legacy folders
+Atlas_vertebra_folds/
+data_Atlas-vertebra/
+Postprocessing/
+Predictions/
+sliding_predictions_color_fix/
+out/
+Tests/
+
+# Model artifacts
+*.pth
+*.pt
+events.out.tfevents.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.idea/
+.vscode/
+
+# External/local projects
+VerteMark/
+VerteMarkPackager/
+vmk_test/
