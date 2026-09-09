@@ -1,0 +1,44 @@
+# Config pro U-Net trénink - vlastní soubor, hodnoty vycházejí z
+# Modely/vertebra_segmentation_and_keypoint_extraction-main/Src/Atlas/training/configs/atlas_multiclass_patch.yaml
+# (channels/strides/num_res_units/augmentace 1:1 stejné - jen patch 256 místo 512
+# a patches_per_image 8 místo 20, viz devnotes/dodatek k trénování.md).
+
+run:
+  name: unet-atlas-v1
+  seed: 42
+  max_epochs: 60
+  full_val_every: 5
+  max_minutes: null   # nastavit přes --max-minutes při spuštění na omezené noční okno
+
+data:
+  patch_size: 256
+  patches_per_image: 8
+  train_batch_size: 8
+  num_workers: 4
+  heqv: true
+
+optimizer:
+  lr: 0.01
+
+scheduler:
+  kind: cosine   # "cosine" nebo "plateau"
+  t0: 5
+  t_mult: 2
+  eta_min: 1.0e-8
+  plateau_patience: 5
+  plateau_ratio: 0.8
+
+transforms:
+  rand_flip_prob: 0.5
+  rand_rotate90_prob: 0.5
+  rand_rotate90_max_k: 3
+  rand_zoom_min: 0.9
+  rand_zoom_max: 1.1
+  rand_zoom_prob: 0.3
+  rand_gaussian_noise_prob: 0.2
+
+validation:
+  sw_batch_size: 4
+  sw_overlap: 0.25
+
+amp: true
