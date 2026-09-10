@@ -28,8 +28,24 @@ def build_dataloaders(
     seed = raw["run"]["seed"]
     patch_size = data_cfg["patch_size"]
 
-    train_pairs = load_pairs_from_csv(paths.FOLDS_DIR / "train.csv", paths.IMAGES_DIR, paths.MASKS_DIR)
-    val_pairs = load_pairs_from_csv(paths.FOLDS_DIR / "val.csv", paths.IMAGES_DIR, paths.MASKS_DIR)
+    # Když jsou k dispozici předpočítané CLAHE snímky, čte se z nich a transformace
+    # HistogramEqualizationd se do pipeline vůbec nepřidá (výsledek je totožný,
+    # jen se nepočítá 8x na snímek za epochu). Viz scripts/precompute_heqv.py.
+    use_precomputed = data_cfg.get("use_precomputed_heqv", False) and data_cfg["heqv"]
+    if use_precomputed:
+        if not paths.IMAGES_HEQV_DIR.exists():
+            raise FileNotFoundError(
+                f"use_precomputed_heqv je zapnuté, ale {paths.IMAGES_HEQV_DIR} neexistuje. "
+                "Spusť nejdřív: py -3 scripts/precompute_heqv.py"
+            )
+        images_dir = paths.IMAGES_HEQV_DIR
+        heqv_at_runtime = False
+    else:
+        images_dir = paths.IMAGES_DIR
+        heqv_at_runtime = data_cfg["heqv"]
+
+    train_pairs = load_pairs_from_csv(paths.FOLDS_DIR / "train.csv", images_dir, paths.MASKS_DIR)
+    val_pairs = load_pairs_from_csv(paths.FOLDS_DIR / "val.csv", images_dir, paths.MASKS_DIR)
     if limit_train is not None:
         train_pairs = train_pairs[:limit_train]
     if limit_val is not None:
@@ -37,7 +53,7 @@ def build_dataloaders(
 
     train_transform = build_train_transforms(
         patch_size,
-        heqv=data_cfg["heqv"],
+        heqv=heqv_at_runtime,
         rand_flip_prob=raw["transforms"]["rand_flip_prob"],
         rand_rotate90_prob=raw["transforms"]["rand_rotate90_prob"],
         rand_rotate90_max_k=raw["transforms"]["rand_rotate90_max_k"],
@@ -46,8 +62,10 @@ def build_dataloaders(
         rand_zoom_prob=raw["transforms"]["rand_zoom_prob"],
         rand_gaussian_noise_prob=raw["transforms"]["rand_gaussian_noise_prob"],
         seed=seed,
+        crop_strategy=data_cfg.get("crop_strategy", "random"),
+        pos_ratio=data_cfg.get("pos_ratio", 0.8),
     )
-    eval_transform = build_eval_transforms(patch_size, heqv=data_cfg["heqv"])
+    eval_transform = build_eval_transforms(patch_size, heqv=heqv_at_runtime)
 
     train_dataset = AtlasPatchDataset(
         train_pairs, train_transform, NUM_CLASSES, patches_per_image=data_cfg["patches_per_image"]

@@ -14,11 +14,27 @@ data:
   patch_size: 256
   patches_per_image: 8
   train_batch_size: 8
-  num_workers: 4
+  # Měření ukázalo, že pipeline byla omezená CPU (GPU čekalo na data, 0% vytížení).
+  # 8 workerů + předpočítané CLAHE to obrací na výpočetně vázané.
+  # Na stroji s méně jádry klidně snížit — nemá to vliv na výsledek, jen na rychlost.
+  num_workers: 8
   heqv: true
+  use_precomputed_heqv: true   # čte z Inputdata/datasets-PNG-heqv (scripts/precompute_heqv.py)
+  # Cílené vzorkování výřezů: 80 % výřezů se vystředí na obratel, 20 % na pozadí.
+  # Obratle zabírají jen ~3 % plochy snímku, takže při rovnoměrně náhodném
+  # vzorkování 15,6 % výřezů neobsahovalo vůbec žádné popředí. Ověřeno, že to
+  # pomáhá OBĚMA modelům (U-Net 0,883 -> 0,897; UNETR 0,078 -> 0,182 při jinak
+  # shodných podmínkách), proto je to nastavené stejně u obou — datová pipeline
+  # musí zůstat identická, jinak by srovnání architektur nic neznamenalo.
+  crop_strategy: pos_neg
+  pos_ratio: 0.8
 
 optimizer:
-  lr: 0.01
+  # Původní repozitář měl 0.01, ale s naší konfigurací (patch 256, batch 8, AMP)
+  # to na reálných datech po ~200 krocích spolehlivě zdiverguje na loss=nan
+  # (ověřeno, zachyceno nan-pojistkou v loop.py). 1e-3 je standardní hodnota
+  # pro Adam a drží se stabilně.
+  lr: 0.001
 
 scheduler:
   kind: cosine   # "cosine" nebo "plateau"

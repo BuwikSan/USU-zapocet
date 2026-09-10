@@ -72,14 +72,15 @@ class AtlasPatchDataset(Dataset):
         return len(self.pairs) * self.patches_per_image
 
     def _load_raw(self, pair: ImageMaskPair) -> dict:
-        # IMREAD_COLOR vrátí BGR i pro původně šedotónový rentgen (cv2 replikuje
-        # jediný kanál do 3) - přehodíme na RGB kvůli konzistenci, i když si tu na
-        # pořadí kanálů reálně nezáleží (všechny tři jsou identické).
-        image_bgr = cv2.imread(str(pair.image_path), cv2.IMREAD_COLOR)
-        if image_bgr is None:
+        # Rentgen je fakticky šedotónový (i když originální PNG mají 3 identické
+        # kanály), takže se čte jedním kanálem a replikuje se až tady. Ušetří to
+        # dekódování dvou zbytečných kanálů oproti IMREAD_COLOR + cvtColor.
+        # Model má na vstupu 3 kanály (viz models.py, IN_CHANNELS) kvůli shodě
+        # s konfigurací původního repozitáře, proto se kanál ztrojí.
+        image_gray = cv2.imread(str(pair.image_path), cv2.IMREAD_GRAYSCALE)
+        if image_gray is None:
             raise FileNotFoundError(f"Nelze načíst snímek: {pair.image_path}")
-        image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-        image_chw = image_rgb.transpose(2, 0, 1).astype(np.float32)  # (3,H,W)
+        image_chw = np.repeat(image_gray[np.newaxis, :, :], 3, axis=0).astype(np.float32)  # (3,H,W)
 
         mask = cv2.imread(str(pair.mask_path), cv2.IMREAD_GRAYSCALE)
         if mask is None:
@@ -92,6 +93,12 @@ class AtlasPatchDataset(Dataset):
         pair = self.pairs[idx // self.patches_per_image]
         data = self._load_raw(pair)
         data = self.transform(data)
+
+        # RandCropByPosNegLabeld (strategie "pos_neg") vrací SEZNAM výřezů, i když
+        # se žádá jen o jeden — na rozdíl od ostatních transformací, které vracejí
+        # slovník. Bereme první prvek, jinak by se dál pracovalo se seznamem.
+        if isinstance(data, list):
+            data = data[0]
 
         image_t = data["image"].float()
         label_idx = data["label"][0].round().long()

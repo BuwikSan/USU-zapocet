@@ -30,11 +30,36 @@ def build_unet(num_classes: int = NUM_CLASSES) -> UNet:
     )
 
 
-def build_unetr(patch_size: int, num_classes: int = NUM_CLASSES) -> UNETR:
+# Velikosti Vision Transformeru uvnitř UNETR: (hidden_size, mlp_dim, num_heads).
+#
+# Výchozí nastavení MONAI odpovídá ViT-Base (768/3072/12) — tedy velikosti
+# z původní publikace, kde ale trénovali na řádově větších datech. Na našich
+# 2978 snímcích to znamená 116 M parametrů proti 1,6 M u U-Netu, tedy 72násobek.
+# Takto předimenzovaný model se v malém datovém režimu učí pomalu; zkušební
+# běhy to potvrdily (viz devnotes/STAV_PROJEKTU.md §8.10).
+#
+# Menší varianty jsou proto legitimní přizpůsobení modelu velikosti dat, ne
+# ochuzení experimentu — naopak přibližují kapacitu UNETR k U-Netu, takže je
+# srovnání architektur poctivější.
+VIT_SIZES: dict[str, tuple[int, int, int]] = {
+    "base": (768, 3072, 12),   # ~116 M parametru, 166 ms/davka
+    "small": (384, 1536, 6),   # ~30 M parametru,   89 ms/davka
+    "tiny": (192, 768, 3),     # ~8.4 M parametru,  70 ms/davka
+}
+
+
+def build_unetr(patch_size: int, num_classes: int = NUM_CLASSES,
+                vit_size: str = "base") -> UNETR:
+    if vit_size not in VIT_SIZES:
+        raise ValueError(f"Neznama velikost ViT: {vit_size!r} (k dispozici: {', '.join(VIT_SIZES)})")
+    hidden_size, mlp_dim, num_heads = VIT_SIZES[vit_size]
     return UNETR(
         in_channels=IN_CHANNELS,
         out_channels=num_classes,
         img_size=(patch_size, patch_size),
         spatial_dims=2,
         feature_size=16,
+        hidden_size=hidden_size,
+        mlp_dim=mlp_dim,
+        num_heads=num_heads,
     )

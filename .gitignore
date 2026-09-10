@@ -3,3 +3,7 @@ Inputdata/*
 examples/*
 training_outputs/*
 *.log
+modely/*
+__pycache__/
+*.pyc
+notebooks/.ipynb_checkpoints/

@@ -16,6 +16,7 @@ import numpy as np
 from monai.transforms import (
     Compose,
     MapTransform,
+    RandCropByPosNegLabeld,
     RandFlipd,
     RandGaussianNoised,
     RandRotate90d,
@@ -64,13 +65,29 @@ def build_train_transforms(
     rand_zoom_prob: float,
     rand_gaussian_noise_prob: float,
     seed: int,
+    crop_strategy: str = "random",
+    pos_ratio: float = 0.8,
 ) -> Compose:
     """
     Trénovací pipeline: (volitelně HEQV) -> normalizace intenzity -> padding na
-    alespoň `patch_size` -> náhodný výřez `patch_size`x`patch_size` (= "jeden patch"
+    alespoň `patch_size` -> výřez `patch_size`x`patch_size` (= "jeden patch"
     z `patches_per_image`, viz dataset.py) -> geometrické a šumové augmentace ->
     tenzory. Aplikuje se STEJNĚ na "image" i "label" tam, kde jde o geometrickou
     transformaci (jinak by anotace přestala sedět na obraz), šum jen na "image".
+
+    `crop_strategy` rozhoduje, jak se výřez vybírá:
+
+    - `"random"` — rovnoměrně náhodná pozice kdekoliv ve snímku.
+    - `"pos_neg"` — výřez se s pravděpodobností `pos_ratio` vystředí na pixel
+      patřící některému obratli, jinak na pozadí.
+
+    Proč to druhé existuje: obratle zabírají jen kolem 3 % plochy snímku, takže
+    velká část rovnoměrně náhodných výřezů neobsahuje vůbec žádné popředí. Model
+    pak dostává převážně signál "všechno je pozadí" a triviální řešení
+    (predikovat samé pozadí) je pro něj silné lokální minimum. U konvoluční sítě
+    to nevadilo — díky induktivnímu biasu se z něj dostane rychle — ale UNETR
+    se v něm ve zkušebních bězích zasekával (viz devnotes/STAV_PROJEKTU.md).
+    Cílené vzorkování je v medicínské segmentaci standardní postup.
     """
     steps = []
     if heqv:
@@ -78,7 +95,24 @@ def build_train_transforms(
     steps += [
         ScaleIntensityd(keys=["image"]),
         SpatialPadd(keys=["image", "label"], spatial_size=(patch_size, patch_size)),
-        RandSpatialCropd(keys=["image", "label"], roi_size=(patch_size, patch_size), random_size=False),
+    ]
+
+    if crop_strategy == "pos_neg":
+        # pos/neg je POMĚR, ne pravděpodobnost — MONAI z nich pravděpodobnost
+        # dopočítá jako pos/(pos+neg).
+        steps.append(RandCropByPosNegLabeld(
+            keys=["image", "label"], label_key="label",
+            spatial_size=(patch_size, patch_size),
+            pos=pos_ratio, neg=1.0 - pos_ratio, num_samples=1,
+            allow_smaller=True,
+        ))
+    elif crop_strategy == "random":
+        steps.append(RandSpatialCropd(keys=["image", "label"],
+                                      roi_size=(patch_size, patch_size), random_size=False))
+    else:
+        raise ValueError(f"Neznámá crop_strategy: {crop_strategy!r} (očekává se 'random' nebo 'pos_neg')")
+
+    steps += [
         RandFlipd(keys=["image", "label"], spatial_axis=0, prob=rand_flip_prob),
         RandFlipd(keys=["image", "label"], spatial_axis=1, prob=rand_flip_prob),
         RandRotate90d(keys=["image", "label"], prob=rand_rotate90_prob, max_k=rand_rotate90_max_k),

@@ -42,6 +42,11 @@ def main() -> None:
     parser.add_argument("--no-resume", dest="resume", action="store_false", help="Ignorovat existující checkpoint a začít znovu od epochy 0.")
     parser.add_argument("--limit-train", type=int, default=None, help="Jen pro rychlý smoke-test: použít prvních N trénovacích snímků.")
     parser.add_argument("--limit-val", type=int, default=None, help="Jen pro rychlý smoke-test: použít prvních N validačních snímků.")
+    parser.add_argument("--run-name", type=str, default=None,
+                        help="Přebije run.name z configu. Odděluje checkpointy zkušebních běhů od ostrých.")
+    parser.add_argument("--full-val-every", type=int, default=None, help="Přebije run.full_val_every.")
+    parser.add_argument("--crop-strategy", choices=["random", "pos_neg"], default=None,
+                        help="'pos_neg' cílí výřezy na obratle místo rovnoměrně náhodné pozice.")
     args = parser.parse_args()
 
     raw = load_yaml(args.config)
@@ -49,6 +54,12 @@ def main() -> None:
         raw["run"]["max_epochs"] = args.max_epochs
     if args.max_minutes is not None:
         raw["run"]["max_minutes"] = args.max_minutes
+    if args.run_name is not None:
+        raw["run"]["name"] = args.run_name
+    if args.full_val_every is not None:
+        raw["run"]["full_val_every"] = args.full_val_every
+    if args.crop_strategy is not None:
+        raw["data"]["crop_strategy"] = args.crop_strategy
 
     set_seed(raw["run"]["seed"])
 

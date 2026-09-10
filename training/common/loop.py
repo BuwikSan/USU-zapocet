@@ -64,6 +64,14 @@ class LoopConfig:
     plateau_patience: int = 5
     plateau_ratio: float = 0.8
     grad_clip_norm: float = 1.0
+    # Lineární rozjezd learning rate od nuly během prvních N epoch. U transformerů
+    # je to běžná praxe: náhodně inicializovaná attention na začátku produkuje
+    # nesmyslné gradienty a plný learning rate hned od prvního kroku model
+    # rozhodí. U konvolučních sítí to potřeba není (0 = vypnuto).
+    warmup_epochs: int = 0
+    # Kolik nan/inf hodnot loss po sobě se toleruje, než se běh ukončí jako
+    # zdivergovaný. Jednotlivé výpadky se přeskakují, série znamená rozpad tréninku.
+    max_nan_streak: int = 20
 
 
 def _build_scheduler(optimizer: torch.optim.Optimizer, cfg: LoopConfig):
@@ -124,6 +132,22 @@ def run_training(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
+    # Hlasitá diagnostika hardwaru. Trénink běží přes noc bez dohledu a tichý pád
+    # na CPU (typicky po přeinstalaci torche na CPU-only build, viz
+    # devnotes/PROSTREDI_A_PASTI.md §4.1) by znamenal ~100x pomalejší běh, který
+    # by se odhalil až ráno. Radši ať to křičí hned na prvním řádku.
+    if device.type == "cuda":
+        props = torch.cuda.get_device_properties(0)
+        print(f"[hw] GPU: {props.name} | VRAM {props.total_memory / 1e9:.2f} GB "
+              f"| torch {torch.__version__} | AMP {'zapnuto' if cfg.use_amp else 'vypnuto'}")
+    else:
+        print("!" * 70)
+        print("[hw] VAROVANI: CUDA NENI DOSTUPNA - trenink pobezi na CPU a bude radove pomalejsi!")
+        print(f"[hw] torch = {torch.__version__} (build bez '+cu' = CPU-only)")
+        print("[hw] Naprava: py -3 -m pip install --force-reinstall torch "
+              "--index-url https://download.pytorch.org/whl/cu128")
+        print("!" * 70)
+
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
     scheduler = _build_scheduler(optimizer, cfg)
     scaler = torch.amp.GradScaler("cuda", enabled=cfg.use_amp and device.type == "cuda")
@@ -141,11 +165,23 @@ def run_training(
     run_start = time.perf_counter()
     stopped_reason = "max_epochs_reached"
 
+    nan_streak = 0
+
     for epoch in range(start_epoch, cfg.max_epochs):
+        # ---------------- WARMUP ----------------
+        # Během rozjezdu se learning rate nastavuje ručně a scheduler se
+        # nechá spát — jinak by si obě logiky přepisovaly hodnotu navzájem.
+        in_warmup = cfg.warmup_epochs > 0 and epoch < cfg.warmup_epochs
+        if in_warmup:
+            warmup_lr = cfg.lr * (epoch + 1) / cfg.warmup_epochs
+            for group in optimizer.param_groups:
+                group["lr"] = warmup_lr
+
         # ---------------- TRAIN ----------------
         model.train()
         epoch_loss = 0.0
         n_batches = 0
+        nan_batches = 0
         dice_metric.reset()
 
         for images, labels in train_loader:
@@ -156,6 +192,25 @@ def run_training(
             with torch.amp.autocast("cuda", enabled=cfg.use_amp and device.type == "cuda"):
                 logits = model(images)
                 loss = loss_function(logits, labels)
+
+            # Pojistka proti rozpadu tréninku. Jakmile loss jednou skončí na nan/inf,
+            # krok optimizeru by tu hodnotu rozlil do všech vah a od té chvíle už
+            # model jen produkuje nan - další hodiny výpočtu jsou k ničemu.
+            # Ojedinělý nan se přeskočí (může jít o jednu vadnou dávku), ale série
+            # po sobě jdoucích nanů znamená divergenci (typicky moc vysoký learning
+            # rate - přesně to potkalo UNETR s lr=1e-2, viz devnotes/STAV_PROJEKTU.md
+            # §5.1) a je lepší běh rovnou zastavit s jasnou hláškou.
+            if not torch.isfinite(loss):
+                nan_streak += 1
+                nan_batches += 1
+                if nan_streak >= cfg.max_nan_streak:
+                    print(f"[{cfg.run_name}] PRERUSENO: {nan_streak} nekonecnych/nan hodnot loss "
+                          f"za sebou v epose {epoch}. Trenink diverguje - sniz learning rate "
+                          f"(nyni {cfg.lr:.1e}).")
+                    stopped_reason = "diverged_nan_loss"
+                    break
+                continue
+            nan_streak = 0
 
             if cfg.use_amp and device.type == "cuda":
                 scaler.scale(loss).backward()
@@ -175,10 +230,17 @@ def run_training(
             n_batches += 1
             dice_metric(_onehot_argmax(logits.detach(), cfg.num_classes), labels)
 
+        if stopped_reason == "diverged_nan_loss":
+            # Checkpoint se tu záměrně NEUKLÁDÁ - poslední uložený stav je z konce
+            # předchozí epochy, tedy ještě před rozpadem, a je tak použitelnější.
+            break
+
         train_loss = epoch_loss / max(1, n_batches)
         train_dice = float(dice_metric.aggregate().item())
         writer.add_scalar("Loss/train", train_loss, epoch)
         writer.add_scalar("Dice/train", train_dice, epoch)
+        if nan_batches:
+            print(f"[{cfg.run_name}] pozor: v epose {epoch} preskoceno {nan_batches} davek s nan/inf loss")
 
         # ---------------- VALIDACE (jen periodicky, plná sliding-window) ----------------
         run_full_val = ((epoch + 1) % cfg.full_val_every == 0) or (epoch == cfg.max_epochs - 1)
@@ -204,11 +266,15 @@ def run_training(
             writer.add_scalar("Dice/val", val_dice, epoch)
 
         # ---------------- SCHEDULER ----------------
-        if cfg.scheduler_kind == "plateau":
+        if in_warmup:
+            current_lr = optimizer.param_groups[0]["lr"]
+        elif cfg.scheduler_kind == "plateau":
             scheduler.step(train_loss if val_dice is None else -val_dice)
             current_lr = optimizer.param_groups[0]["lr"]
         else:
-            scheduler.step(epoch)
+            # Kosinový cyklus se počítá od konce rozjezdu, ne od epochy 0 —
+            # jinak by warmup jen "snědl" začátek cyklu.
+            scheduler.step(epoch - cfg.warmup_epochs)
             current_lr = scheduler.get_last_lr()[0]
         writer.add_scalar("LR", current_lr, epoch)
 

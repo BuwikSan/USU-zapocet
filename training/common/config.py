@@ -34,4 +34,5 @@ def build_loop_config(raw: dict[str, Any]) -> LoopConfig:
         eta_min=raw["scheduler"]["eta_min"],
         plateau_patience=raw["scheduler"]["plateau_patience"],
         plateau_ratio=raw["scheduler"]["plateau_ratio"],
+        warmup_epochs=raw["scheduler"].get("warmup_epochs", 0),
     )

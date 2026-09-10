@@ -10,12 +10,30 @@ run:
   full_val_every: 5
   max_minutes: null
 
+model:
+  # Velikost Vision Transformeru uvnitr UNETR (viz training/common/models.py::VIT_SIZES).
+  #
+  # Vychozi hodnota MONAI je "base" (ViT-Base, 116 M parametru) — tedy velikost
+  # z puvodni publikace UNETR, kde ale trenovali na radove vetsich datech.
+  # Na nasich 2978 snimcich to znamena 72x vic parametru nez ma U-Net (1,6 M),
+  # a zkusebni behy ukazaly, ze se takovy model nema jak rozjet.
+  #
+  # "tiny" (8,4 M) je kapacitne blizko U-Netu, takze je srovnani architektur
+  # poctivejsi, a navic je 2,4x rychlejsi -> vic epoch za stejny cas.
+  # Merene srovnani za jinak identickych podminek (400 snimku, 10 epoch):
+  #     ViT-base  val Dice 0,182
+  #     ViT-tiny  val Dice 0,400
+  vit_size: tiny
+
 data:
   patch_size: 256
   patches_per_image: 8
   train_batch_size: 8
-  num_workers: 4
+  num_workers: 8
   heqv: true
+  use_precomputed_heqv: true   # viz komentář v unet.yaml
+  crop_strategy: pos_neg       # MUSÍ být stejné jako u U-Netu, viz komentář v unet.yaml
+  pos_ratio: 0.8
 
 optimizer:
   # POZOR: 0.01 (hodnota vyladěná pro malý CNN v atlas_multiclass_patch.yaml) na
@@ -23,15 +41,25 @@ optimizer:
   # ověřeno smoke testem (training/train_unetr.py --limit-train 4 --max-epochs 2).
   # 1e-4 je hodnota z originální UNETR publikace (Hatamizadeh et al., 2021) a je
   # to běžný řád LR pro Vision Transformery obecně - viz devnotes/teorie/02_...md.
-  lr: 1.0e-4
+  # 3e-4 místo 1e-4: ověřeno krátkými běhy (scripts/tune_unetr.py). Samotné
+  # zvýšení LP při náhodných výřezech ale NEPOMOHLO (bylo horší než 1e-4) —
+  # zabralo až v kombinaci s cíleným vzorkováním výřezů a rozjezdem.
+  lr: 3.0e-4
 
 scheduler:
   kind: cosine
-  t0: 5
+  # t0 15 místo 5: s krátkým cyklem klesl learning rate do epochy 4 na ~1e-5 a
+  # UNETR se prakticky zastavil dřív, než se stihl rozjet. Delší cyklus než
+  # plánovaný počet epoch znamená prakticky monotónně klesající LR bez restartů.
+  t0: 15
   t_mult: 2
   eta_min: 1.0e-8
   plateau_patience: 5
   plateau_ratio: 0.8
+  # Dvouepochový lineární rozjezd LR od nuly. U transformerů standard —
+  # náhodně inicializovaná attention dává zpočátku divoké gradienty.
+  # U-Net to nepotřebuje (má warmup_epochs 0, tedy vypnuto).
+  warmup_epochs: 2
 
 transforms:
   rand_flip_prob: 0.5

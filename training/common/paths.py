@@ -16,6 +16,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # git (viz .gitignore), vyrobené skripty ve scripts/ (Fáze A a B).
 INPUT_DATA_DIR = REPO_ROOT / "Inputdata"
 IMAGES_DIR = INPUT_DATA_DIR / "datasets-PNG"
+# Tytéž snímky s předem spočítanou ekvalizací histogramu (scripts/precompute_heqv.py).
+# Používá se, když je v configu data.use_precomputed_heqv: true — odstraňuje to
+# opakovaný výpočet CLAHE za běhu, který byl úzkým hrdlem tréninku.
+IMAGES_HEQV_DIR = INPUT_DATA_DIR / "datasets-PNG-heqv"
 MASKS_DIR = INPUT_DATA_DIR / "datasets-MASK"
 FOLDS_DIR = INPUT_DATA_DIR / "folds" / "atlas_vertebra"
 
