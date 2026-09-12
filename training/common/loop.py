@@ -168,6 +168,8 @@ def run_training(
     nan_streak = 0
 
     for epoch in range(start_epoch, cfg.max_epochs):
+        epoch_start = time.perf_counter()
+
         # ---------------- WARMUP ----------------
         # Během rozjezdu se learning rate nastavuje ručně a scheduler se
         # nechá spát — jinak by si obě logiky přepisovaly hodnotu navzájem.
@@ -245,7 +247,10 @@ def run_training(
         # ---------------- VALIDACE (jen periodicky, plná sliding-window) ----------------
         run_full_val = ((epoch + 1) % cfg.full_val_every == 0) or (epoch == cfg.max_epochs - 1)
         val_dice = None
+        train_seconds = time.perf_counter() - epoch_start
+        val_seconds = 0.0
         if run_full_val:
+            val_start = time.perf_counter()
             model.eval()
             dice_metric.reset()
             with torch.no_grad():
@@ -263,6 +268,7 @@ def run_training(
                         )
                     dice_metric(_onehot_argmax(logits, cfg.num_classes), labels)
             val_dice = float(dice_metric.aggregate().item())
+            val_seconds = time.perf_counter() - val_start
             writer.add_scalar("Dice/val", val_dice, epoch)
 
         # ---------------- SCHEDULER ----------------
@@ -285,9 +291,14 @@ def run_training(
             save_checkpoint(best_ckpt, model, optimizer, scheduler, scaler, epoch, best_val_dice)
 
         val_str = f"{val_dice:.4f}" if val_dice is not None else "-"
+        # Časy se vypisují kvůli plánování: trénink běží v omezených oknech, takže
+        # je potřeba vidět tempo a odhadnout, kolik epoch se do okna ještě vejde.
+        time_str = f"{train_seconds / 60:.1f}min"
+        if val_seconds:
+            time_str += f"+{val_seconds / 60:.1f}min val"
         print(
             f"[{cfg.run_name}] epoch {epoch}: loss={train_loss:.4f} "
-            f"train_dice={train_dice:.4f} val_dice={val_str} lr={current_lr:.2e}"
+            f"train_dice={train_dice:.4f} val_dice={val_str} lr={current_lr:.2e} ({time_str})"
         )
 
         if cfg.max_minutes is not None:

@@ -288,14 +288,17 @@ if torch.cuda.is_available():
 Než se pustí několikahodinový běh, ověříme na hrstce snímků, že celý řetěz
 funguje. Trvá to zhruba minutu.
 
-Použitý `--no-resume` zajistí, že se nenaváže na starší checkpoint."""),
+⚠️ Test běží pod **vlastním jménem** (`--run-name smoke-unet`). Bez toho by
+zapisoval do checkpointů ostrého běhu a v kombinaci s `--no-resume` by je
+přepsal — tedy zahodil několikahodinový trénink."""),
 
-("code", """run_script("training/train_unet.py", "--max-epochs", "2",
-           "--limit-train", "40", "--limit-val", "4", "--no-resume")"""),
+("code", """run_script("training/train_unet.py", "--run-name", "smoke-unet",
+           "--max-epochs", "2", "--limit-train", "40", "--limit-val", "4", "--no-resume")"""),
 
 ("md", """## 4. Ostrý trénink
 
-⚠️ **Dlouhý běh** — naměřeno ~2,6 min na epochu, tedy zhruba 2,6 h pro 60 epoch.
+Naměřeno na plných datech: **3,5 min na epochu** + 1,1 min na plnou
+sliding-window validaci (každou 5. epochu). 60 epoch tedy vyjde na **~3,7 h**.
 
 Trénink je **přerušitelný**:
 - checkpoint se ukládá po každé epoše, takže přerušení stojí nanejvýš
@@ -476,14 +479,19 @@ dvojnásobek.
 U-Net je proti tomu tak levný, že by mu 512 px nevadilo — ale musí mít **stejné
 podmínky** jako UNETR, jinak by srovnání nic neznamenalo."""),
 
-("md", """## 3. Test průchodnosti"""),
+("md", """## 4. Test průchodnosti
 
-("code", """run_script("training/train_unetr.py", "--max-epochs", "2",
-           "--limit-train", "16", "--limit-val", "2", "--no-resume")"""),
+⚠️ Stejně jako u U-Netu běží pod vlastním jménem (`--run-name smoke-unetr`),
+aby nepřepsal checkpointy ostrého běhu."""),
 
-("md", """## 4. Ostrý trénink
+("code", """run_script("training/train_unetr.py", "--run-name", "smoke-unetr",
+           "--max-epochs", "2", "--limit-train", "16", "--limit-val", "2", "--no-resume")"""),
 
-⚠️ Naměřeno ~9,3 min na epochu → zhruba 4,6 h pro 30 epoch."""),
+("md", """## 5. Ostrý trénink
+
+Naměřeno na plných datech: **7,0 min na epochu** + 1,8 min na plnou
+sliding-window validaci (běží každou 5. epochu). 60 epoch tedy vyjde
+zhruba na **7,4 h**."""),
 
 ("code", """# ODKOMENTUJ pro ostrý trénink:
 # run_script("training/train_unetr.py", "--max-minutes", "360")
@@ -491,7 +499,10 @@ podmínky** jako UNETR, jinak by srovnání nic neznamenalo."""),
 print("Spouštět raději z terminálu:")
 print("  py -3 -u training/train_unetr.py --max-minutes 360")"""),
 
-("md", """## 5. Srovnání průběhu obou modelů"""),
+("md", """## 6. Srovnání průběhu obou modelů
+
+Křivky se načítají z TensorBoard logů ostrého běhu (`unet-atlas-v1`,
+`unetr-atlas-v1`), ne z testu průchodnosti výše."""),
 
 ("code", """from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 
@@ -683,7 +694,9 @@ for c in found:
 if not found:
     print("  žádné — nejdřív trénink (notebooky 02 a 03)")"""),
 
-("code", """# ODKOMENTUJ, až budou checkpointy hotové:
+("code", """# Predikce už jsou vygenerované ostrým během. Kdyby bylo potřeba je vyrobit
+# znovu (jiný checkpoint, jiný split), stačí odkomentovat — každý běh trvá
+# desítky sekund až minuty:
 # run_script("training/predict.py", "--model", "unet",  "--split", "test")
 # run_script("training/predict.py", "--model", "unetr", "--split", "test")
 # run_script("scripts/ts2d_inference.py", "--split", "test")
@@ -769,33 +782,62 @@ if not figs:
 
 ("md", """## 6. Závěr
 
-*(Doplnit po ostrém tréninku podle skutečných čísel.)*
+### Naměřené výsledky (testovací set, 992 snímků)
 
-Body k diskusi:
+| Model | Dice | IoU |
+|---|---:|---:|
+| **U-Net** | **0,9412** | **0,8942** |
+| UNETR (ViT-Tiny) | 0,9229 | 0,8658 |
+| TotalSegmentator2D | 0,0004 | 0,0003 |
 
-1. **Hypotéza studie** předpokládala, že UNETR díky globálnímu kontextu dosáhne
-   srovnatelných nebo lepších výsledků než U-Net, a že oba doménově trénované
-   modely překonají obecný TotalSegmentator2D. Ověřit proti naměřeným hodnotám.
+### Vyhodnocení hypotézy
 
-2. **TotalSegmentator2D** krční obratle nenašel vůbec — doložený doménový posun
-   (notebook 04). Potvrzuje část hypotézy o generalizovaných modelech, ale
-   z jiného důvodu, než se čekalo: nejde o horší přesnost, ale o úplné selhání
-   mimo trénovací doménu.
+Hypotéza z [`devnotes/plan.md`](../devnotes/plan.md) měla dvě části a
+**potvrdila se jen jedna**:
 
-3. **Poměr cena/výkon.** UNETR má ~70× víc parametrů než U-Net a trénink mu trvá
-   zhruba 3,5× déle na epochu. Otázka do diskuse: vyplatilo se to?
+1. *„UNETR dosáhne srovnatelných nebo lepších výsledků než U-Net"* —
+   **zčásti**. Výsledky jsou srovnatelné (rozdíl 0,018 Dice), ale UNETR
+   U-Net nepřekonal. Očekávaná výhoda globálního kontextu z attention se
+   neprojevila; úloha je totiž silně lokální — obratle jsou kompaktní útvary
+   a konvoluční induktivní bias na ně sedí lépe.
+2. *„Oba doménově trénované modely překonají TotalSegmentator2D"* —
+   **potvrzeno drtivě** (0,94 a 0,92 proti 0,0004).
 
-4. **Omezení práce**, která je poctivé uvést:
-   - maska je čtyřúhelníková aproximace obratle, ne přesný obrys — strop pro
-     dosažitelný Dice u všech modelů
-   - jeden pevný split místo křížové validace (výpočetní rozpočet) → výsledky
-     jsou zatížené variabilitou konkrétního rozdělení
-   - výřezy 256 px místo 512 px
-   - počet epoch byl omezený dostupným časem, ne konvergencí
+### Co stojí za pozornost
 
-Podrobné zdůvodnění všech odchylek od původního návrhu je v
-[`devnotes/plan.md`](../devnotes/plan.md) a
-[`devnotes/STAV_PROJEKTU.md`](../devnotes/STAV_PROJEKTU.md)."""),
+**Rozdíl mezi U-Netem a UNETR je konzistentní napříč všemi třídami**
+(~0,02 u každého obratle). Není to tedy tak, že by UNETR selhával na něčem
+konkrétním — je systematicky o kousek horší. To je čistší zjištění, než kdyby
+měl výpadek na jedné třídě.
+
+**C2 je pro oba modely nejtěžší** (0,908 a 0,874 proti 0,93–0,95 u ostatních).
+Souvisí to s anotací: C2 má jen tři landmarky místo čtyř, takže jeho maska je
+trojúhelníková aproximace. Je to strop daný daty, ne slabina modelů.
+
+**Cesta UNETR z 0,106 na 0,923** je nejsilnější poznatek celé práce. Ve
+zkušebním běhu vypadal jako selhání a uvažovalo se o jeho nahrazení. Rozhodly
+dvě věci, obě doložené měřením (viz notebook 03 a
+[`devnotes/STAV_PROJEKTU.md`](../devnotes/STAV_PROJEKTU.md) §8.10):
+zmenšení Vision Transformeru ze 116 M na 8,4 M parametrů a plný dataset místo
+400 snímků. Závěr tedy nezní „transformer na tuto úlohu nestačí", ale
+**„transformer je konkurenceschopný, pokud se naškáluje na objem dostupných dat"**.
+
+**Poměr cena/výkon** přesto vychází ve prospěch U-Netu: má 5× méně parametrů,
+trénuje se 2× rychleji (3,5 vs 7,0 min/epocha) a je o 0,018 Dice lepší.
+
+### Omezení práce
+
+Je poctivé uvést:
+
+- Maska je **čtyřúhelníková aproximace** obratle, ne přesný obrys — strop pro
+  dosažitelný Dice, stejný pro všechny modely.
+- **Jeden pevný split** místo křížové validace (výpočetní rozpočet), takže
+  výsledky jsou zatížené variabilitou konkrétního rozdělení.
+- **Výřezy 256 px** místo 512 px kvůli kvadratické ceně attention.
+- U-Net byl na stropě zhruba od 15. epochy, zatímco UNETR stoupal až do konce —
+  **při delším tréninku by se rozdíl mohl dál zmenšit**.
+- TotalSegmentator2D nebyl na tuto doménu trénován; jeho výsledek nevypovídá
+  o kvalitě nástroje, jen o přenositelnosti mimo trénovací doménu."""),
 ])
 
 ALL = [("01_data_a_priprava", n01), ("02_trenink_unet", n02),

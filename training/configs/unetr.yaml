@@ -6,7 +6,11 @@
 run:
   name: unetr-atlas-v1
   seed: 42
-  max_epochs: 30
+  # Stejny pocet epoch jako U-Net — zamerne. Kazdy model by sice konvergoval
+  # jinak rychle (U-Net je temer na stropu uz po par epochach, UNETR stoupa
+  # dele), ale shodny pocet epoch je pri obhajobe jednoznacnejsi: lisi se
+  # architektura, ne rozpocet treninku.
+  max_epochs: 60
   full_val_every: 5
   max_minutes: null
 
