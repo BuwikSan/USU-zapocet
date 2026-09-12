@@ -150,7 +150,6 @@ Všechny jsou zdůvodněné v `devnotes/plan.md` a `devnotes/STAV_PROJEKTU.md`:
 | `devnotes/STAV_PROJEKTU.md` | co je hotové, jak to funguje a proč |
 | `devnotes/DALSI_KROKY.md` | co zbývá |
 | `devnotes/PROSTREDI_A_PASTI.md` | instalace, verze, nástrahy |
-| `devnotes/teorie/` | vysvětlivky: konvoluce a U-Net, Vision Transformer a UNETR, metriky a trénink, datová pipeline |
 
 ---
 
