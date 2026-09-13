@@ -164,3 +164,4 @@ v původní podobě a **nijak se neupravují** — slouží jen jako referenčn�
   Alshenoudy et al. (2025), *Leveraging Synthetic Data for Whole-Body
   Segmentation in X-Ray Images*
 - **nnU-Net** — Isensee et al. (2021)
+- repo https://github.com/JaroslavRadimsky/vertebra_segmentation_and_keypoint_extraction.git - odkud jsem čerpal inspiraci pro preprocessing dat a trening modelů
